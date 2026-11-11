@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Configuración base para producción
+  // Configuración base optimizada para build con webpack
 };
 
 module.exports = nextConfig;
