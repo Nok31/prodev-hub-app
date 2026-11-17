@@ -1,0 +1,1 @@
+{/* Reemplaza o integra este bloque en tu renderizado cuando activeTab === 'tableros' */}

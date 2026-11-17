@@ -1,478 +1,764 @@
-"use client";
+'use client';
 
-import React, { useState } from "react";
-import { 
-  LayoutDashboard, 
-  Ticket as TicketIcon, 
-  Kanban, 
-  Bot, 
-  BarChart3, 
-  Bell, 
-  Plus, 
-  Search, 
-  Clock, 
-  X, 
-  FileText, 
-  Send
-} from "lucide-react";
+import React, { useState, useEffect, useRef } from 'react';
+import { loginApi, getMeApi, refreshSessionApi, logoutApi, setAccessToken, apiFetch } from '@/services/auth';
+import { LayoutDashboard, Ticket, Kanban, Bot, BarChart3 } from 'lucide-react';
 
-// Tipado explícito para las tarjetas de Kanban y evitar el error de TypeScript
-interface KanbanCard {
-  id: string;
-  title: string;
-  user: string;
-  badge: string;
-  active?: boolean;
-}
+export default function MobileApp() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [userSession, setUserSession] = useState<any>(null);
+  const [checkingSession, setCheckingSession] = useState(true);
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'tickets' | 'tableros' | 'asistente' | 'reportes' | 'perfil'>('dashboard');
 
-interface KanbanColumn {
-  name: string;
-  count: number;
-  cards: KanbanCard[];
-}
+  const [metrics, setMetrics] = useState({ open: 0, inProgress: 0, waiting: 0, resolvedToday: 0, total: 0 });
+  const [activity, setActivity] = useState<any[]>([]);
+  const [loadingDashboard, setLoadingDashboard] = useState(false);
 
-const DASHBOARD_METRICS = {
-  abiertos: 5,
-  enProgreso: 0,
-  resueltosHoy: 0,
-  total: 7
-};
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [showAllRead, setShowAllRead] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
 
-const RECENT_ACTIVITY = [
-  { id: 1, user: "Agente IA", action: "comentó (interno) en", target: "PRD-2026-0007", time: "hace alrededor de 12 horas" },
-  { id: 2, user: "Recepción Telefónica", action: "creó", target: "PRO-2026-0007", time: "hace 1 día" },
-  { id: 3, user: "Felipe Figueroa", action: "actualizó", target: "H12 - Informe de Propuesta y Arquitectura para Aplicación Móvil", time: "hace 7 días" },
-  { id: 4, user: "Felipe Figueroa", action: "creó", target: "H12 - Informe de Propuesta y Arquitectura para Aplicación Móvil", time: "hace 7 días" },
-  { id: 5, user: "Felipe Figueroa", action: "completó", target: "Prueba tarjeta", time: "hace 7 días" },
-];
+  const [profileName, setProfileName] = useState('');
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [profileMessage, setProfileMessage] = useState<string | null>(null);
+  const [passwordMessage, setPasswordMessage] = useState<string | null>(null);
 
-const SUPPORT_TICKETS = [
-  { id: "PRO-2026-0007", title: "Prodeb: Un documento no aparece en la empresa Prodeb, sin mensaje de error, y el cliente no puede entrar a la planta.", source: "RT Recepción Telefónica", status: "Abierto", priority: "Crítica", priorityColor: "bg-red-500/20 text-red-400 border-red-500/30", time: "hace 1 día" },
-  { id: "PRO-2026-0006", title: "ProDev: Ticket de prueba para generar un ticket en ProDev Hub.", source: "RT Recepción Telefónica", status: "Abierto", priority: "Media", priorityColor: "bg-amber-500/20 text-amber-400 border-amber-500/30", time: "hace 8 días" },
-  { id: "PRO-2026-0005", title: "ProDev: La página de ProDev Hub no responde al intentar registrar un ticket.", source: "RT Recepción Telefónica", status: "Abierto", priority: "Alta", priorityColor: "bg-orange-500/20 text-orange-400 border-orange-500/30", time: "hace 9 días" },
-  { id: "PRO-2026-0004", title: "ProDev (prueba): Ticket de prueba del sistema de voz", source: "RT Recepción Telefónica", status: "Abierto", priority: "Baja", priorityColor: "bg-slate-500/20 text-slate-400 border-slate-500/30", time: "hace 10 días" },
-  { id: "PRO-2026-0003", title: "Dar horas a tarjetas de GRC", source: "BQ Benjamín Quiroz", status: "Resuelto", priority: "Alta", priorityColor: "bg-orange-500/20 text-orange-400 border-orange-500/30", time: "hace 3 meses" },
-  { id: "PRO-2026-0002", title: "Revisar Horas de F80 por solicitud de GRC", source: "BQ Benjamín Quiroz", status: "Resuelto", priority: "Alta", priorityColor: "bg-orange-500/20 text-orange-400 border-orange-500/30", time: "hace 4 meses" },
-  { id: "PRO-2026-0001", title: "Usuario tipo MANAGER en Tenant GRC no puede crear un nuevo usuario", source: "BQ Benjamín Quiroz", status: "Abierto", priority: "Baja", priorityColor: "bg-slate-500/20 text-slate-400 border-slate-500/30", time: "hace 4 meses" },
-];
+  const [theme, setTheme] = useState<'classic' | 'liquid'>('classic');
+  const [mode, setMode] = useState<'dark' | 'light' | 'system'>('dark');
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
 
-const KANBAN_COLUMNS: KanbanColumn[] = [
-  {
-    name: "Backlog",
-    count: 7,
-    cards: [
-      { id: "H11", title: "Hub en Vivo", user: "Benjamín Quiroz", badge: "BQ" },
-      { id: "H2", title: "Enlazar Tickets y/o Cards", user: "Benjamín Quiroz", badge: "BQ" },
-      { id: "H3", title: "Asignación automática de IDs a Cards", user: "Benjamín Quiroz", badge: "BQ" },
-      { id: "H6", title: "Revisitar Tableros", user: "Benjamín Quiroz", badge: "BQ" },
-    ]
-  },
-  {
-    name: "En Progreso",
-    count: 1,
-    cards: [
-      { id: "H00", title: "Prueba tarjeta", user: "Felipe Figueroa", badge: "FF" }
-    ]
-  },
-  {
-    name: "En Revisión",
-    count: 1,
-    cards: [
-      { id: "H12", title: "Informe de Propuesta y Arquitectura para Aplicación Móvil", user: "Felipe Figueroa", badge: "FF", active: true }
-    ]
-  },
-  {
-    name: "Completado",
-    count: 4,
-    cards: [
-      { id: "H5", title: "Nombrar/Renombrar Adjuntos", user: "Benjamín Quiroz", badge: "BQ" },
-      { id: "H1", title: "Base de Conocimientos para IA", user: "Benjamín Quiroz", badge: "BQ" },
-    ]
+  const menuRef = useRef<HTMLDivElement>(null);
+  const notifRef = useRef<HTMLDivElement>(null);
+  const infoRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    async function checkInitialSession() {
+      try {
+        const refreshData = await refreshSessionApi();
+        if (refreshData && (refreshData as any).accessToken) {
+          const meData = await getMeApi();
+          setUserSession(meData);
+          if (meData?.user?.name) setProfileName(meData.user.name);
+          await loadDashboardData();
+          await loadNotifications();
+          registerServiceWorker();
+        }
+      } catch (err) {
+        console.log('Sin sesión previa activa.');
+      } finally {
+        setCheckingSession(false);
+      }
+    }
+    checkInitialSession();
+
+    const savedTheme = localStorage.getItem('prodev_theme') as 'classic' | 'liquid';
+    const savedMode = localStorage.getItem('prodev_mode') as 'dark' | 'light' | 'system';
+    if (savedTheme) setTheme(savedTheme);
+    if (savedMode) setMode(savedMode);
+
+    const handleClickOutside = (event: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setUserMenuOpen(false);
+      }
+      if (notifRef.current && !notifRef.current.contains(event.target as Node)) {
+        setNotificationsOpen(false);
+      }
+      if (infoRef.current && !infoRef.current.contains(event.target as Node)) {
+        setInfoOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const registerServiceWorker = async () => {
+    if ('serviceWorker' in navigator) {
+      try {
+        await navigator.serviceWorker.register('/sw.js');
+      } catch (err) {
+        console.error('Error al registrar Service Worker:', err);
+      }
+    }
+  };
+
+  const loadDashboardData = async () => {
+    setLoadingDashboard(true);
+    try {
+      const metricsRes: any = await apiFetch('/dashboard/metrics');
+      const activityRes: any = await apiFetch('/dashboard/activity?limit=15');
+      if (metricsRes) setMetrics(metricsRes);
+      if (activityRes && activityRes.data) setActivity(activityRes.data);
+    } catch (err) {
+      console.error('Error al cargar datos del dashboard:', err);
+    } finally {
+      setLoadingDashboard(false);
+    }
+  };
+
+  const loadNotifications = async () => {
+    try {
+      const [notifRes, countRes]: [any, any] = await Promise.all([
+        apiFetch('/notifications?limit=30'),
+        apiFetch('/notifications/unread-count')
+      ]);
+      if (notifRes && notifRes.data) setNotifications(notifRes.data);
+      if (countRes && typeof countRes.count === 'number') setUnreadCount(countRes.count);
+    } catch (err) {
+      console.error('Error al cargar notificaciones:', err);
+    }
+  };
+
+  const markAllRead = async () => {
+    try {
+      await apiFetch('/notifications/read-all', { method: 'POST' });
+      setUnreadCount(0);
+      setNotifications(notifications.map(n => ({ ...n, isRead: true })));
+    } catch (err) {
+      console.error('Error al marcar leídas:', err);
+    }
+  };
+
+  const handleUpdateProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setProfileMessage(null);
+    try {
+      await apiFetch('/auth/profile', {
+        method: 'PUT',
+        body: JSON.stringify({ name: profileName }),
+      });
+      setProfileMessage('Perfil actualizado correctamente.');
+    } catch (err: any) {
+      setProfileMessage(err.message || 'Error al actualizar perfil.');
+    }
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPasswordMessage(null);
+    if (newPassword !== confirmPassword) {
+      setPasswordMessage('Las nuevas contraseñas no coinciden.');
+      return;
+    }
+    try {
+      await apiFetch('/auth/password', {
+        method: 'PUT',
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      setPasswordMessage('Contraseña actualizada correctamente.');
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (err: any) {
+      setPasswordMessage(err.message || 'Error al cambiar contraseña.');
+    }
+  };
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+    try {
+      await loginApi(email, password);
+      const meData = await getMeApi();
+      setUserSession(meData);
+      if (meData?.user?.name) setProfileName(meData.user.name);
+      await loadDashboardData();
+      await loadNotifications();
+      registerServiceWorker();
+    } catch (err: any) {
+      setError(err.message || 'Credenciales inválidas');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    await logoutApi();
+    setUserSession(null);
+    setUserMenuOpen(false);
+  };
+
+  const changeTheme = (newTheme: 'classic' | 'liquid') => {
+    setTheme(newTheme);
+    localStorage.setItem('prodev_theme', newTheme);
+  };
+
+  const changeMode = (newMode: 'dark' | 'light' | 'system') => {
+    setMode(newMode);
+    localStorage.setItem('prodev_mode', newMode);
+  };
+
+  const isLight = mode === 'light' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: light)').matches);
+  const outerBgClass = isLight ? 'bg-gray-200' : 'bg-gray-950';
+
+  const bgClass = isLight
+    ? (theme === 'liquid' ? 'bg-gradient-to-br from-indigo-50 via-purple-50 to-blue-100 text-gray-900' : 'bg-gray-50 text-gray-950')
+    : (theme === 'liquid' ? 'bg-gradient-to-br from-[#090d16] via-[#111c33] to-[#060911] text-gray-100' : 'bg-[#0b0f19] text-gray-100');
+
+  const cardClass = isLight
+    ? (theme === 'liquid' ? 'bg-white/70 backdrop-blur-md border border-indigo-200/60 shadow-xl' : 'bg-white border border-gray-200 shadow-md')
+    : (theme === 'liquid' ? 'bg-[#111827]/80 backdrop-blur-md border border-blue-500/30 shadow-2xl' : 'bg-[#111827] border border-gray-800 shadow-xl');
+
+  const headerClass = isLight
+    ? 'bg-white/90 backdrop-blur border-b border-gray-200 shadow-sm'
+    : 'bg-[#111827]/90 backdrop-blur border-b border-gray-800 shadow-md';
+
+  if (checkingSession) {
+    return (
+      <div className={`min-h-screen flex items-center justify-center ${outerBgClass}`}>
+        <div className="w-full max-w-sm h-[85vh] max-h-[850px] bg-[#0b0f19] rounded-[40px] border-[8px] border-gray-800 shadow-2xl flex items-center justify-center text-sky-400">
+          <p className="text-sm font-medium animate-pulse">Cargando ProDev Hub PWA...</p>
+        </div>
+      </div>
+    );
   }
-];
 
-export default function Home() {
-  const [activeTab, setActiveTab] = useState<"dashboard" | "tickets" | "tableros" | "ia" | "reportes">("dashboard");
-  const [selectedCard, setSelectedCard] = useState<boolean>(false);
-  const [kanbanColIndex, setKanbanColIndex] = useState(2);
-  const [newComment, setNewComment] = useState("");
+  if (!userSession) {
+    return (
+      <main className={`min-h-screen flex items-center justify-center p-0 sm:p-6 ${outerBgClass}`}>
+        <div className="w-full sm:max-w-[420px] sm:h-[88vh] sm:max-h-[900px] sm:rounded-[44px] sm:border-[10px] sm:border-gray-900 bg-[#0b0f19] text-gray-100 flex flex-col justify-center p-6 shadow-2xl overflow-y-auto relative">
+          <div className="max-w-sm w-full mx-auto space-y-8">
+            <div className="space-y-3 text-center">
+              <div className="flex justify-center items-center">
+                <div className="flex items-center space-x-1 px-2.5 py-1 rounded bg-[#171c28] border border-gray-800">
+                  <span className="font-extrabold text-xs tracking-widest text-white">PRODEV</span>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <h1 className="text-xl font-bold tracking-tight text-white flex items-center justify-center gap-1.5">
+                  PRODEV <span className="text-sky-400 font-light">HUB</span>
+                </h1>
+                <p className="text-xs text-gray-400">Inicia sesión para continuar</p>
+              </div>
+            </div>
+
+            {error && (
+              <div className="p-3 bg-red-950/50 border border-red-800/50 text-red-300 text-xs rounded-xl">
+                {error}
+              </div>
+            )}
+
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-300 mb-1.5">Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  className="w-full px-4 py-3 bg-[#111827] border border-gray-800 rounded-xl focus:outline-none focus:border-sky-500 text-white placeholder-gray-600 text-xs transition"
+                  placeholder="tu@email.com"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-300 mb-1.5">Contraseña</label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  className="w-full px-4 py-3 bg-[#111827] border border-gray-800 rounded-xl focus:outline-none focus:border-sky-500 text-white placeholder-gray-600 text-xs transition"
+                  placeholder="••••••••"
+                />
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full py-3 px-4 bg-sky-400 hover:bg-sky-300 text-gray-950 font-semibold text-xs rounded-xl shadow-lg transition disabled:opacity-50 mt-2"
+              >
+                {loading ? 'Iniciando sesión...' : 'Iniciar Sesión'}
+              </button>
+            </form>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  const userName = userSession.user?.name || 'Felipe Figueroa';
+  const userInitials = userName.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase();
+  const filteredNotifications = showAllRead ? notifications : notifications.filter(n => !n.isRead);
 
   return (
-    <div className="min-h-screen bg-[#0d111a] text-slate-100 flex flex-col justify-between w-full max-w-md mx-auto shadow-2xl border-x border-slate-800/80 font-sans selection:bg-blue-600">
-      
-      {/* Header Superior Móvil Fijo */}
-      <header className="sticky top-0 z-40 bg-[#0d111a]/95 backdrop-blur-md border-b border-slate-800/80 px-4 py-3 flex items-center justify-between w-full">
-        <div className="flex items-center space-x-2.5">
-          <div className="bg-blue-600 p-1.5 rounded-lg text-white font-bold text-xs tracking-wider shadow-md shadow-blue-500/20">
-            PRODEV
-          </div>
-          <div>
-            <div className="flex items-center space-x-1.5">
-              <span className="font-bold text-sm tracking-tight text-white">ProDev <span className="text-blue-500">Hub</span></span>
-              <span className="text-[9px] bg-blue-500/10 text-blue-400 font-semibold px-1.5 py-0.2 rounded border border-blue-500/20">
-                Móvil
-              </span>
+    <div className={`min-h-screen flex items-center justify-center p-0 sm:p-6 ${outerBgClass}`}>
+      <style jsx global>{`
+        ::-webkit-scrollbar {
+          width: 5px;
+        }
+        ::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+          background: ${isLight ? 'rgba(156, 163, 175, 0.5)' : 'rgba(55, 65, 81, 0.6)'};
+          border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+          background: ${isLight ? 'rgba(107, 114, 128, 0.8)' : 'rgba(75, 85, 99, 0.9)'};
+        }
+      `}</style>
+
+      <div className={`w-full sm:max-w-[420px] sm:h-[88vh] sm:max-h-[900px] sm:rounded-[44px] sm:border-[10px] sm:border-gray-900 ${bgClass} flex flex-col justify-between font-sans shadow-2xl overflow-hidden relative transition-colors duration-300`}>
+
+        {/* Header Superior con Logotipo Exacto PRODEV HUB */}
+        <header className={`${headerClass} sticky top-0 z-30 px-4 py-3 flex justify-between items-center`}>
+          <div className="flex items-center space-x-2.5">
+            <div className="flex items-center space-x-1.5 bg-[#171c28] border border-gray-800 px-2.5 py-1 rounded-md shadow-sm">
+              <span className="font-extrabold text-[11px] tracking-widest text-white">PRODEV</span>
+              <span className="font-light text-[11px] tracking-wider text-gray-400">HUB</span>
             </div>
-            <p className="text-[10px] text-slate-400 capitalize">{activeTab}</p>
-          </div>
-        </div>
-
-        <div className="flex items-center space-x-2">
-          <button className="p-1.5 text-slate-400 hover:text-white rounded-lg relative">
-            <Bell className="w-5 h-5" />
-            <span className="absolute top-1 right-1 w-2 h-2 bg-blue-500 rounded-full" />
-          </button>
-          <div className="w-7 h-7 rounded-full bg-blue-600/30 border border-blue-500/40 flex items-center justify-center text-xs font-bold text-blue-300">
-            FF
-          </div>
-        </div>
-      </header>
-
-      {/* ÁREA DE CONTENIDO DE ANCHO HOMOGÉNEO */}
-      <main className="flex-1 overflow-y-auto px-4 py-4 pb-20 w-full space-y-4">
-        
-        {/* VISTA 1: DASHBOARD */}
-        {activeTab === "dashboard" && (
-          <div className="space-y-4 animate-in fade-in duration-200 w-full">
             <div>
-              <h2 className="text-base font-bold text-white">Dashboard</h2>
-              <p className="text-[11px] text-slate-400">Resumen general de actividad</p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2.5 w-full">
-              <div className="bg-[#141a29] p-3 rounded-xl border border-slate-800/80">
-                <span className="text-[10px] text-slate-400 block">Tickets Abiertos</span>
-                <span className="text-xl font-bold text-white mt-1 block">{DASHBOARD_METRICS.abiertos}</span>
-                <span className="text-[9px] text-slate-500 mt-1 block">Pendientes de atención</span>
+              <div className="flex items-center space-x-1">
+                <span className="text-[9px] bg-blue-950/80 text-blue-300 px-1 rounded border border-blue-800/40 font-medium">Móvil</span>
               </div>
-              <div className="bg-[#141a29] p-3 rounded-xl border border-slate-800/80">
-                <span className="text-[10px] text-slate-400 block">En Progreso</span>
-                <span className="text-xl font-bold text-amber-400 mt-1 block">{DASHBOARD_METRICS.enProgreso}</span>
-                <span className="text-[9px] text-slate-500 mt-1 block">Tickets en curso</span>
-              </div>
-              <div className="bg-[#141a29] p-3 rounded-xl border border-slate-800/80">
-                <span className="text-[10px] text-slate-400 block">Resueltos Hoy</span>
-                <span className="text-xl font-bold text-emerald-400 mt-1 block">{DASHBOARD_METRICS.resueltosHoy}</span>
-                <span className="text-[9px] text-slate-500 mt-1 block">Tickets resueltos</span>
-              </div>
-              <div className="bg-[#141a29] p-3 rounded-xl border border-slate-800/80">
-                <span className="text-[10px] text-slate-400 block">Total</span>
-                <span className="text-xl font-bold text-blue-400 mt-1 block">{DASHBOARD_METRICS.total}</span>
-                <span className="text-[9px] text-slate-500 mt-1 block">Tickets totales</span>
-              </div>
-            </div>
-
-            <div className="bg-[#141a29] p-3.5 rounded-xl border border-slate-800/80 space-y-3 w-full">
-              <h3 className="text-xs font-bold text-white uppercase tracking-wider">Actividad Reciente</h3>
-              <div className="space-y-3">
-                {RECENT_ACTIVITY.map((act) => (
-                  <div key={act.id} className="flex items-start space-x-2.5 text-xs pb-2 border-b border-slate-800/50 last:border-0 last:pb-0">
-                    <div className="w-6 h-6 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-[10px] font-bold text-blue-400 shrink-0">
-                      {act.user.split(" ").map(n => n[0]).join("").slice(0, 2)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-slate-300 leading-tight break-words">
-                        <span className="font-semibold text-white">{act.user}</span> {act.action} <span className="text-blue-400 font-medium">{act.target}</span>
-                      </p>
-                      <span className="text-[10px] text-slate-500 block mt-0.5">{act.time}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
+              <p className="text-[10px] opacity-70 capitalize">{activeTab}</p>
             </div>
           </div>
-        )}
 
-        {/* VISTA 2: TICKETS */}
-        {activeTab === "tickets" && (
-          <div className="space-y-4 animate-in fade-in duration-200 w-full">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-base font-bold text-white">Tickets de Soporte</h2>
-                <p className="text-[11px] text-slate-400">{SUPPORT_TICKETS.length} tickets en total</p>
-              </div>
-              <button className="bg-blue-600 text-white text-xs px-2.5 py-1.5 rounded-lg flex items-center gap-1 font-semibold shadow-md">
-                <Plus className="w-3.5 h-3.5" />
-                <span>Nuevo</span>
+          <div className="flex items-center space-x-2.5 relative">
+
+            {/* BOTÓN DE INFORMACIÓN */}
+            <div className="relative" ref={infoRef}>
+              <button
+                onClick={() => { setInfoOpen(!infoOpen); setNotificationsOpen(false); setUserMenuOpen(false); }}
+                className="relative opacity-80 hover:opacity-100 transition p-1 text-gray-300"
+                title="Información"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                </svg>
               </button>
-            </div>
 
-            <div className="relative w-full">
-              <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
-              <input 
-                type="text" 
-                placeholder="Buscar por título o número..."
-                className="w-full bg-[#141a29] border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500"
-              />
-            </div>
-
-            <div className="space-y-2.5 w-full">
-              {SUPPORT_TICKETS.map((ticket) => (
-                <div key={ticket.id} className="bg-[#141a29] border border-slate-800 rounded-xl p-3 space-y-2 w-full">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-[11px] font-bold text-blue-400">{ticket.id}</span>
-                    <div className="flex items-center space-x-1.5">
-                      <span className={`text-[9px] font-semibold px-2 py-0.5 rounded border ${ticket.priorityColor}`}>
-                        {ticket.priority}
-                      </span>
-                      <span className={`text-[9px] font-semibold px-2 py-0.5 rounded ${ticket.status === "Abierto" ? "bg-blue-500/20 text-blue-400" : "bg-emerald-500/20 text-emerald-400"}`}>
-                        {ticket.status}
-                      </span>
+              {infoOpen && (
+                <div className="absolute right-0 top-9 w-64 bg-[#111827] border border-gray-800 text-gray-200 rounded-2xl shadow-2xl p-4 z-50 text-xs space-y-3 text-center">
+                  <p className="font-bold text-white border-b border-gray-800 pb-2">Información</p>
+                  <div className="py-2 flex flex-col items-center justify-center space-y-2">
+                    <div className="w-8 h-8 rounded-full bg-gray-800 flex items-center justify-center text-gray-400">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                     </div>
-                  </div>
-                  <p className="text-xs text-slate-200 line-clamp-2 leading-snug">{ticket.title}</p>
-                  <div className="flex items-center justify-between pt-1 text-[10px] text-slate-500 border-t border-slate-800/50">
-                    <span className="truncate max-w-[160px]">{ticket.source}</span>
-                    <span>{ticket.time}</span>
+                    <p className="text-[11px] text-gray-400">Sin información disponible</p>
                   </div>
                 </div>
-              ))}
+              )}
             </div>
+
+            {/* BOTÓN DE NOTIFICACIONES */}
+            <div className="relative" ref={notifRef}>
+              <button
+                onClick={() => { setNotificationsOpen(!notificationsOpen); setInfoOpen(false); setUserMenuOpen(false); }}
+                className="relative opacity-80 hover:opacity-100 transition p-1 text-gray-300"
+                title="Notificaciones"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
+                </svg>
+                {unreadCount > 0 && (
+                  <span className="absolute top-0.5 right-0.5 w-2 h-2 bg-red-500 rounded-full animate-pulse"></span>
+                )}
+              </button>
+
+              {notificationsOpen && (
+                <div className="absolute right-0 top-9 w-80 bg-[#111827] border border-gray-800 text-gray-200 rounded-2xl shadow-2xl p-3 z-50 text-xs space-y-2">
+                  <div className="flex justify-between items-center border-b border-gray-800 pb-2">
+                    <p className="font-bold text-white text-xs">Notificaciones</p>
+                    <div className="flex items-center space-x-3 text-[10px]">
+                      <button onClick={markAllRead} className="text-sky-400 hover:underline flex items-center gap-1">
+                        ✓ Marcar leídas
+                      </button>
+                      <button onClick={() => setShowAllRead(!showAllRead)} className="text-gray-400 hover:text-white flex items-center gap-1">
+                        👁 {showAllRead ? 'Ocultar leídos' : 'Mostrar leídos'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="max-h-64 overflow-y-auto space-y-2 divide-y divide-gray-800/50">
+                    {filteredNotifications.length === 0 ? (
+                      <p className="text-[11px] text-gray-500 text-center py-6">No hay notificaciones nuevas</p>
+                    ) : (
+                      filteredNotifications.map((n, i) => (
+                        <div key={n.id || i} className={`pt-2.5 space-y-1 ${n.isRead ? 'opacity-50' : ''}`}>
+                          <div className="flex items-center space-x-1.5">
+                            {!n.isRead && <span className="w-1.5 h-1.5 bg-sky-400 rounded-full"></span>}
+                            <p className="font-semibold text-white text-[11px]">{n.title}</p>
+                          </div>
+                          <p className="text-[10px] text-gray-300 pl-3">{n.message}</p>
+                          <span className="text-[9px] text-gray-500 pl-3 block">{new Date(n.createdAt).toLocaleString()}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* AVATAR Y MENÚ */}
+            <div className="relative" ref={menuRef}>
+              <button
+                onClick={() => { setUserMenuOpen(!userMenuOpen); setInfoOpen(false); setNotificationsOpen(false); }}
+                className="w-7 h-7 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center text-[11px] shadow-md border border-blue-400/30 hover:opacity-90 transition"
+              >
+                {userInitials}
+              </button>
+
+              {userMenuOpen && (
+                <div className="absolute right-0 top-11 w-56 bg-[#111827] border border-gray-800 text-gray-200 rounded-2xl shadow-2xl p-2 z-50 text-xs space-y-2">
+                  <div className="px-3 py-2 border-b border-gray-800">
+                    <p className="font-bold text-white">{userName}</p>
+                    <p className="text-[11px] text-gray-400 truncate">{userSession.user?.email || email}</p>
+                  </div>
+
+                  <button
+                    onClick={() => { setActiveTab('perfil'); setUserMenuOpen(false); }}
+                    className="w-full text-left px-3 py-1.5 text-gray-300 hover:bg-gray-800 rounded-xl transition flex items-center justify-between"
+                  >
+                    <span>Mi Perfil</span>
+                    <svg className="w-3.5 h-3.5 opacity-60" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"></path></svg>
+                  </button>
+
+                  <div className="border-t border-gray-800 my-1"></div>
+
+                  <div className="px-2 py-1 space-y-1">
+                    <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-1">Tema</span>
+                    <button onClick={() => changeTheme('classic')} className={`w-full flex items-center justify-between px-3 py-1.5 rounded-xl transition ${theme === 'classic' ? 'bg-blue-600 text-white font-semibold' : 'hover:bg-gray-800 text-gray-300'}`}>
+                      <span>Classic</span>
+                      {theme === 'classic' && <span className="w-1.5 h-1.5 bg-white rounded-full"></span>}
+                    </button>
+                    <button onClick={() => changeTheme('liquid')} className={`w-full flex items-center justify-between px-3 py-1.5 rounded-xl transition ${theme === 'liquid' ? 'bg-blue-600 text-white font-semibold' : 'hover:bg-gray-800 text-gray-300'}`}>
+                      <span>Liquid Glass</span>
+                      {theme === 'liquid' && <span className="w-1.5 h-1.5 bg-white rounded-full"></span>}
+                    </button>
+                  </div>
+
+                  <div className="border-t border-gray-800 my-1"></div>
+
+                  <div className="px-2 py-1 space-y-1">
+                    <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-1">Modo</span>
+                    <button onClick={() => changeMode('light')} className={`w-full flex items-center justify-between px-3 py-1.5 rounded-xl transition ${mode === 'light' ? 'bg-blue-600 text-white font-semibold' : 'hover:bg-gray-800 text-gray-300'}`}>
+                      <span>Claro</span>
+                      {mode === 'light' && <span className="w-1.5 h-1.5 bg-white rounded-full"></span>}
+                    </button>
+                    <button onClick={() => changeMode('dark')} className={`w-full flex items-center justify-between px-3 py-1.5 rounded-xl transition ${mode === 'dark' ? 'bg-blue-600 text-white font-semibold' : 'hover:bg-gray-800 text-gray-300'}`}>
+                      <span>Oscuro</span>
+                      {mode === 'dark' && <span className="w-1.5 h-1.5 bg-white rounded-full"></span>}
+                    </button>
+                    <button onClick={() => changeMode('system')} className={`w-full flex items-center justify-between px-3 py-1.5 rounded-xl transition ${mode === 'system' ? 'bg-blue-600 text-white font-semibold' : 'hover:bg-gray-800 text-gray-300'}`}>
+                      <span>Sistema</span>
+                      {mode === 'system' && <span className="w-1.5 h-1.5 bg-white rounded-full"></span>}
+                    </button>
+                  </div>
+
+                  <div className="border-t border-gray-800 my-1"></div>
+
+                  <button onClick={handleLogout} className="w-full text-left px-3 py-2 text-red-400 hover:bg-red-950/40 rounded-xl transition font-medium flex items-center justify-between">
+                    <span>Cerrar Sesión</span>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
+                  </button>
+                </div>
+              )}
+            </div>
+
           </div>
-        )}
+        </header>
 
-        {/* VISTA 3: TABLEROS / KANBAN */}
-        {activeTab === "tableros" && (
-          <div className="space-y-4 animate-in fade-in duration-200 w-full">
-            <div>
-              <h2 className="text-base font-bold text-white">Hub / Tableros</h2>
-              <p className="text-[11px] text-slate-400">ProDev Hub Kanban</p>
-            </div>
-
-            <div className="flex space-x-1.5 overflow-x-auto pb-1 w-full max-w-full">
-              {KANBAN_COLUMNS.map((col, idx) => (
-                <button 
-                  key={col.name}
-                  onClick={() => setKanbanColIndex(idx)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold shrink-0 transition-colors ${
-                    kanbanColIndex === idx 
-                      ? "bg-blue-600 text-white" 
-                      : "bg-[#141a29] text-slate-400 border border-slate-800"
-                  }`}
+        {/* Contenido Principal */}
+        <main className="flex-1 p-4 overflow-y-auto space-y-5 pb-24">
+          {activeTab === 'dashboard' && (
+            <div className="space-y-4">
+              <div className="flex justify-between items-center">
+                <div>
+                  <h2 className="text-lg font-extrabold tracking-tight">Dashboard</h2>
+                  <p className="text-[11px] opacity-70 mt-0.5">Resumen general de actividad</p>
+                </div>
+                <button
+                  onClick={loadDashboardData}
+                  className="text-[10px] bg-blue-600/25 hover:bg-blue-600/40 text-sky-400 border border-sky-500/30 px-2.5 py-1 rounded-lg transition"
                 >
-                  {col.name} ({col.count})
+                  {loadingDashboard ? 'Sincronizando...' : 'Actualizar'}
                 </button>
-              ))}
-            </div>
+              </div>
 
-            <div className="space-y-2.5 w-full">
-              {KANBAN_COLUMNS[kanbanColIndex].cards.map((card) => (
-                <div 
-                  key={card.id}
-                  onClick={() => card.id === "H12" && setSelectedCard(true)}
-                  className={`bg-[#141a29] border rounded-xl p-3 space-y-2 active:scale-98 transition-all cursor-pointer w-full ${
-                    card.active ? "border-blue-500 shadow-md shadow-blue-500/10" : "border-slate-800"
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-mono font-bold text-blue-400">{card.id}</span>
-                    <span className="w-5 h-5 rounded-full bg-slate-800 text-[9px] font-bold text-slate-300 flex items-center justify-center border border-slate-700">
-                      {card.badge}
-                    </span>
+              {/* Métricas Reales */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className={`${cardClass} p-3.5 rounded-2xl space-y-1`}>
+                  <span className="text-[11px] opacity-70 font-medium">Tickets Abiertos</span>
+                  <p className="text-xl font-black">{metrics.open}</p>
+                  <p className="text-[10px] opacity-50">Pendientes de atención</p>
+                </div>
+                <div className={`${cardClass} p-3.5 rounded-2xl space-y-1`}>
+                  <span className="text-[11px] opacity-70 font-medium">En Progreso</span>
+                  <p className="text-xl font-black">{metrics.inProgress}</p>
+                  <p className="text-[10px] opacity-50">Tickets en curso</p>
+                </div>
+                <div className={`${cardClass} p-3.5 rounded-2xl space-y-1`}>
+                  <span className="text-[11px] opacity-70 font-medium">Resueltos Hoy</span>
+                  <p className="text-xl font-black">{metrics.resolvedToday}</p>
+                  <p className="text-[10px] opacity-50">Tickets resueltos</p>
+                </div>
+                <div className={`${cardClass} p-3.5 rounded-2xl space-y-1`}>
+                  <span className="text-[11px] opacity-70 font-medium">Total</span>
+                  <p className="text-xl font-black">{metrics.total}</p>
+                  <p className="text-[10px] opacity-50">Tickets totales</p>
+                </div>
+              </div>
+
+              {/* Actividad Reciente Real */}
+              <div className={`${cardClass} p-4 rounded-2xl space-y-3`}>
+                <h3 className="text-[11px] font-bold opacity-80 tracking-wider uppercase">ACTIVIDAD RECIENTE</h3>
+                <div className="divide-y divide-gray-800/50 text-xs space-y-3 pt-1">
+                  {activity.length === 0 ? (
+                    <p className="text-[11px] opacity-50 text-center py-4">
+                      {loadingDashboard ? 'Cargando actividad...' : 'No hay actividad reciente registrada.'}
+                    </p>
+                  ) : (
+                    activity.map((item, idx) => {
+                      const initials = item.userName ? item.userName.split(' ').map((n: string) => n[0]).join('').substring(0, 2).toUpperCase() : 'EV';
+                      return (
+                        <div key={item.id || idx} className="flex items-start space-x-2.5 pt-3">
+                          <div className="w-6 h-6 rounded-full bg-blue-600 text-white font-bold flex items-center justify-center shrink-0 text-[10px]">
+                            {initials}
+                          </div>
+                          <div>
+                            <p className="opacity-90 text-[11px]">
+                              <strong className="font-medium">{item.userName}</strong> {item.action} <span className="text-sky-400 font-medium">{item.entityTitle || item.entityNumber}</span>
+                            </p>
+                            <span className="text-[9px] opacity-50">
+                              {new Date(item.createdAt).toLocaleString()}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'perfil' && (
+            <div className="space-y-4">
+              <div className="flex items-center space-x-2">
+                <button onClick={() => setActiveTab('dashboard')} className="text-sky-400 hover:underline text-xs flex items-center gap-1">
+                  ← Volver
+                </button>
+                <h2 className="text-lg font-extrabold tracking-tight">Mi Perfil</h2>
+              </div>
+              <p className="text-[11px] opacity-70">Actualiza tu información personal y contraseña</p>
+
+              {/* Tarjeta 1: Información Personal */}
+              <div className={`${cardClass} p-4 rounded-2xl space-y-3`}>
+                <div>
+                  <h3 className="font-bold text-white text-xs">Información Personal</h3>
+                  <p className="text-[10px] text-gray-400">Modifica tu nombre completo</p>
+                </div>
+
+                {profileMessage && (
+                  <div className="p-2.5 bg-blue-950/50 border border-blue-800/50 text-blue-300 text-[11px] rounded-xl">
+                    {profileMessage}
                   </div>
-                  <h4 className="text-xs font-bold text-white">{card.title}</h4>
-                  <p className="text-[10px] text-slate-400">{card.user}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+                )}
 
-        {/* VISTA 4: ASISTENTE IA */}
-        {activeTab === "ia" && (
-          <div className="space-y-4 animate-in fade-in duration-200 min-h-[65vh] flex flex-col justify-between w-full">
-            <div>
-              <h2 className="text-base font-bold text-white flex items-center gap-2">
-                <Bot className="w-5 h-5 text-blue-400" />
-                <span>Asistente IA</span>
-              </h2>
-              <p className="text-[11px] text-slate-400">Consultas de tickets y automatización</p>
-            </div>
+                <form onSubmit={handleUpdateProfile} className="space-y-3 text-xs">
+                  <div>
+                    <label className="block text-[10px] uppercase font-semibold text-gray-400 mb-1">Email</label>
+                    <input
+                      type="email"
+                      disabled
+                      value={userSession.user?.email || email}
+                      className="w-full px-3 py-2 bg-gray-900 border border-gray-800 rounded-xl text-gray-500 text-xs cursor-not-allowed"
+                    />
+                  </div>
 
-            <div className="bg-[#141a29] border border-slate-800 rounded-xl p-4 text-center space-y-2 my-auto w-full">
-              <Bot className="w-10 h-10 text-blue-400 mx-auto" />
-              <div className="text-xs font-bold text-white">¿En qué puedo ayudarte hoy?</div>
-              <p className="text-[11px] text-slate-400">Pregúntame sobre el estado de un ticket o resumen de actividad.</p>
-            </div>
+                  <div>
+                    <label className="block text-[10px] uppercase font-semibold text-gray-400 mb-1">Nombre completo</label>
+                    <input
+                      type="text"
+                      value={profileName}
+                      onChange={(e) => setProfileName(e.target.value)}
+                      required
+                      className="w-full px-3 py-2 bg-[#0b0f19] border border-gray-800 rounded-xl text-white text-xs focus:outline-none focus:border-sky-500"
+                    />
+                  </div>
 
-            <div className="relative w-full">
-              <input 
-                type="text" 
-                placeholder="Escribe un mensaje al asistente..."
-                className="w-full bg-[#141a29] border border-slate-800 rounded-xl pl-3 pr-10 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-              />
-              <button className="absolute right-2 top-2 p-1 bg-blue-600 text-white rounded-lg">
-                <Send className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* VISTA 5: REPORTES */}
-        {activeTab === "reportes" && (
-          <div className="space-y-4 animate-in fade-in duration-200 w-full">
-            <div>
-              <h2 className="text-base font-bold text-white">Reportes</h2>
-              <p className="text-[11px] text-slate-400">Métricas y análisis de rendimiento</p>
-            </div>
-
-            <div className="bg-[#141a29] border border-slate-800 p-3.5 rounded-xl space-y-3 w-full">
-              <div className="text-xs font-bold text-white">Tickets por Prioridad</div>
-              <div className="h-28 bg-slate-950/60 rounded-lg border border-slate-800/80 p-2 flex items-center justify-center space-x-4 w-full">
-                <div className="w-16 h-16 rounded-full border-4 border-amber-500 border-t-red-500 border-r-orange-500 flex items-center justify-center text-[10px] font-bold text-slate-300 shrink-0">
-                  7 Total
-                </div>
-                <div className="text-[10px] space-y-1">
-                  <div className="text-red-400">● Crítica (14%)</div>
-                  <div className="text-orange-400">● Alta (43%)</div>
-                  <div className="text-amber-400">● Media (14%)</div>
-                  <div className="text-slate-400">● Baja (29%)</div>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-[#141a29] border border-slate-800 p-3.5 rounded-xl space-y-2 w-full">
-              <div className="text-xs font-bold text-white">Tiempo Promedio de Resolución</div>
-              <div className="text-2xl font-extrabold text-blue-400">68.7 hrs</div>
-              <p className="text-[10px] text-slate-500">Basado en los últimos 30 días</p>
-            </div>
-          </div>
-        )}
-
-      </main>
-
-      {/* MODAL MÓVIL: DETALLE DE TARJETA KANBAN */}
-      {selectedCard && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-end justify-center p-0">
-          <div className="bg-[#141a29] border-t border-slate-800 rounded-t-2xl w-full max-w-md max-h-[85vh] overflow-y-auto p-4 space-y-4 animate-in slide-in-from-bottom duration-200">
-            
-            <div className="flex items-start justify-between border-b border-slate-800 pb-3">
-              <div>
-                <span className="text-[10px] font-mono font-bold text-blue-400">H12 • En Revisión</span>
-                <h3 className="font-bold text-sm text-white mt-0.5">Informe de Propuesta y Arquitectura para Aplicación Móvil</h3>
-              </div>
-              <button onClick={() => setSelectedCard(false)} className="text-slate-400 p-1">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-1 text-xs">
-              <span className="text-[11px] font-bold text-slate-400 uppercase">Descripción</span>
-              <p className="text-slate-300 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/80 leading-relaxed text-[11px]">
-                Investigar que stack se utilizará en la app móvil para ver los tickets generados, ingresar comentarios y archivos, recibir notificaciones push...
-              </p>
-            </div>
-
-            <div className="space-y-1">
-              <span className="text-[11px] font-bold text-slate-400 uppercase">Adjuntos (1)</span>
-              <div className="bg-slate-950/60 p-2 rounded-lg border border-slate-800 flex items-center space-x-2 text-xs">
-                <FileText className="w-4 h-4 text-blue-400" />
-                <div className="flex-1 truncate">
-                  <div className="text-white font-medium text-[11px]">Informe Tecnico Estrategia Mov...pdf</div>
-                  <div className="text-[9px] text-slate-500">221.0 KB • Felipe Figueroa</div>
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-2 border-t border-slate-800 pt-3">
-              <span className="text-[11px] font-bold text-slate-400 uppercase">Comentarios (3)</span>
-              
-              <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/80 space-y-1">
-                <div className="flex items-center justify-between text-[10px]">
-                  <span className="font-bold text-blue-400">Mario Quiroz</span>
-                  <span className="text-slate-500">hace 5 días</span>
-                </div>
-                <p className="text-[11px] text-slate-200">Vamos por la opción B de la propuesta del documento.</p>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-sky-400 hover:bg-sky-300 text-gray-950 font-semibold text-xs rounded-xl shadow transition"
+                  >
+                    Guardar
+                  </button>
+                </form>
               </div>
 
-              <div className="bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/80 space-y-1">
-                <div className="flex items-center justify-between text-[10px]">
-                  <span className="font-bold text-blue-400">Mario Quiroz</span>
-                  <span className="text-slate-500">hace 5 días</span>
+              {/* Tarjeta 2: Cambiar Contraseña */}
+              <div className={`${cardClass} p-4 rounded-2xl space-y-3`}>
+                <div>
+                  <h3 className="font-bold text-white text-xs">Cambiar Contraseña</h3>
+                  <p className="text-[10px] text-gray-400">Mínimo 8 caracteres, debe incluir mayúscula, minúscula y número</p>
                 </div>
-                <div className="text-[11px] text-slate-200 space-y-1">
-                  <span className="font-bold text-white block">STACK HUB</span>
-                  <p className="text-[10px] text-slate-400">
-                    • Next.js 16 (App Router)<br/>
-                    • React 19<br/>
-                    • TypeScript<br/>
-                    • Tailwind CSS 4<br/>
-                    • Prisma 6
-                  </p>
-                </div>
+
+                {passwordMessage && (
+                  <div className={`p-2.5 border text-[11px] rounded-xl ${passwordMessage.includes('correctamente') ? 'bg-green-950/50 border-green-800/50 text-green-300' : 'bg-red-950/50 border-red-800/50 text-red-300'}`}>
+                    {passwordMessage}
+                  </div>
+                )}
+
+                <form onSubmit={handleChangePassword} className="space-y-3 text-xs">
+                  <div>
+                    <label className="block text-[10px] uppercase font-semibold text-gray-400 mb-1">Contraseña actual</label>
+                    <input
+                      type="password"
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      required
+                      className="w-full px-3 py-2 bg-[#0b0f19] border border-gray-800 rounded-xl text-white text-xs focus:outline-none focus:border-sky-500"
+                      placeholder="••••••••"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] uppercase font-semibold text-gray-400 mb-1">Nueva contraseña</label>
+                    <input
+                      type="password"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      required
+                      className="w-full px-3 py-2 bg-[#0b0f19] border border-gray-800 rounded-xl text-white text-xs focus:outline-none focus:border-sky-500"
+                      placeholder="••••••••"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] uppercase font-semibold text-gray-400 mb-1">Confirmar nueva contraseña</label>
+                    <input
+                      type="password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      required
+                      className="w-full px-3 py-2 bg-[#0b0f19] border border-gray-800 rounded-xl text-white text-xs focus:outline-none focus:border-sky-500"
+                      placeholder="••••••••"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-sky-400 hover:bg-sky-300 text-gray-950 font-semibold text-xs rounded-xl shadow transition"
+                  >
+                    Cambiar Contraseña
+                  </button>
+                </form>
               </div>
             </div>
+          )}
 
-            <div className="flex gap-2 pt-2">
-              <input 
-                type="text" 
-                placeholder="Escribe un comentario..."
-                value={newComment}
-                onChange={(e) => setNewComment(e.target.value)}
-                className="flex-1 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-              />
-              <button className="bg-blue-600 text-white px-3 py-2 rounded-lg text-xs font-semibold">
-                Enviar
-              </button>
+          {activeTab === 'tickets' && (
+            <div className="space-y-4">
+              <h2 className="text-lg font-extrabold tracking-tight">Tickets</h2>
+              <div className={`${cardClass} p-4 rounded-2xl space-y-2`}>
+                <p className="text-xs opacity-80">Módulo de tickets sincronizado con la API.</p>
+              </div>
             </div>
+          )}
 
-          </div>
-        </div>
-      )}
-
-      {/* Navegación Inferior Estilo App Móvil Fija */}
-      <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-[#0d111a]/95 backdrop-blur-md border-t border-slate-800/90 py-2 px-2 flex items-center justify-around z-40 w-full">
-        <button 
-          onClick={() => setActiveTab("dashboard")}
-          className={`flex flex-col items-center space-y-0.5 text-[10px] font-medium transition-colors ${
-            activeTab === "dashboard" ? "text-blue-500" : "text-slate-400 hover:text-slate-200"
-          }`}
-        >
-          <LayoutDashboard className="w-4 h-4" />
-          <span>Dashboard</span>
-        </button>
-
-        <button 
-          onClick={() => setActiveTab("tickets")}
-          className={`flex flex-col items-center space-y-0.5 text-[10px] font-medium transition-colors ${
-            activeTab === "tickets" ? "text-blue-500" : "text-slate-400 hover:text-slate-200"
-          }`}
-        >
-          <TicketIcon className="w-4 h-4" />
-          <span>Tickets</span>
-        </button>
-
-        <button 
-          onClick={() => setActiveTab("tableros")}
-          className={`flex flex-col items-center space-y-0.5 text-[10px] font-medium transition-colors ${
-            activeTab === "tableros" ? "text-blue-500" : "text-slate-400 hover:text-slate-200"
-          }`}
-        >
-          <Kanban className="w-4 h-4" />
-          <span>Tableros</span>
-        </button>
-
-        <button 
-          onClick={() => setActiveTab("ia")}
-          className={`flex flex-col items-center space-y-0.5 text-[10px] font-medium transition-colors ${
-            activeTab === "ia" ? "text-blue-500" : "text-slate-400 hover:text-slate-200"
-          }`}
-        >
-          <Bot className="w-4 h-4" />
-          <span>Asistente IA</span>
-        </button>
-
-        <button 
-          onClick={() => setActiveTab("reportes")}
-          className={`flex flex-col items-center space-y-0.5 text-[10px] font-medium transition-colors ${
-            activeTab === "reportes" ? "text-blue-500" : "text-slate-400 hover:text-slate-200"
-          }`}
-        >
-          <BarChart3 className="w-4 h-4" />
-          <span>Reportes</span>
-        </button>
-      </nav>
-
+{activeTab === 'tableros' && (
+  <div className="p-4 text-slate-100 pb-24">
+    <div className="flex items-center justify-between mb-4">
+      <div>
+        <h1 className="text-xl font-bold tracking-tight">Tableros</h1>
+        <p className="text-xs text-slate-400">1 tablero(s)</p>
+      </div>
     </div>
-  );
-}
+    <div onClick={() => alert("Tablero Hub seleccionado")}
+         className="bg-[#1e293b]/90 border border-slate-800 rounded-2xl overflow-hidden shadow-xl cursor-pointer hover:border-indigo-500/50 transition">
+      <div className="h-28 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 relative">
+        <div className="absolute top-3 right-3 bg-black/40 px-2.5 py-1 rounded-full text-[10px] text-slate-200">Activo</div>
+      </div>
+      <div className="p-4 space-y-3">
+        <div className="text-base font-bold text-white">Hub 🔒</div>
+        <div className="flex items-center justify-between pt-1 border-t border-slate-800 text-xs text-slate-400">
+          <span>👥 BQ · FF · AP</span>
+          <span className="text-sky-400 font-medium">📋 4 listas</span>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
+
+          {/* Módulo Asistente IA */}
+          {activeTab === 'asistente' && (
+            <div className="space-y-4">
+              <h2 className="text-lg font-extrabold tracking-tight">Asistente IA</h2>
+              <div className={`${cardClass} p-4 rounded-2xl`}>
+                <p className="text-xs opacity-80">
+                  Asistente conectado correctamente.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Módulo Reportes */}
+          {activeTab === 'reportes' && (
+            <div className="space-y-4">
+              <h2 className="text-lg font-extrabold tracking-tight">Reportes</h2>
+              <div className={`${cardClass} p-4 rounded-2xl`}>
+                <p className="text-xs opacity-80">
+                  Métricas y reportes del tenant.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Navegación Inferior */}
+          <nav className="absolute bottom-0 left-0 right-0 bg-[#0d111a]/95 backdrop-blur-md border-t border-slate-800/90 py-2 px-2 flex items-center justify-around z-40 w-full">
+            <button
+              onClick={() => setActiveTab('dashboard')}
+              className={`flex flex-col items-center space-y-0.5 text-[10px] font-medium transition-colors ${activeTab === 'dashboard' ? 'text-blue-500' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              <LayoutDashboard className="w-4 h-4" />
+              <span>Dashboard</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('tickets')}
+              className={`flex flex-col items-center space-y-0.5 text-[10px] font-medium transition-colors ${activeTab === 'tickets' ? 'text-blue-500' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              <Ticket className="w-4 h-4" />
+              <span>Tickets</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('tableros')}
+              className={`flex flex-col items-center space-y-0.5 text-[10px] font-medium transition-colors ${activeTab === 'tableros' ? 'text-blue-500' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              <Kanban className="w-4 h-4" />
+              <span>Tableros</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('asistente')}
+              className={`flex flex-col items-center space-y-0.5 text-[10px] font-medium transition-colors ${activeTab === 'asistente' ? 'text-blue-500' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              <Bot className="w-4 h-4" />
+              <span>Asistente IA</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('reportes')}
+              className={`flex flex-col items-center space-y-0.5 text-[10px] font-medium transition-colors ${activeTab === 'reportes' ? 'text-blue-500' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              <BarChart3 className="w-4 h-4" />
+              <span>Reportes</span>
+            </button>
+          </nav>
+
+          </main>
+        </div>
+      </div>
+    );
+  }
