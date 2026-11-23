@@ -160,6 +160,13 @@ export const prodevService = {
     });
   },
 
+  updateTicketAssignee(id: string, assigneeId: string | null) {
+    return apiFetch(`/tickets/${id}/assignee`, {
+      method: 'PATCH',
+      body: JSON.stringify({ assigneeId }),
+    });
+  },
+
   addTicketComment(
     id: string,
     payload: {

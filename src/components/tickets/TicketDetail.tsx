@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, FileText, Send } from 'lucide-react';
-import { prodevService, type TicketStatus } from '@/services/prodev.service';
+import { prodevService, type TicketStatus, type TicketAssignee } from '@/services/prodev.service';
 import type { Adjunto, TicketDetalle } from './types';
 import FilePicker from './FilePicker';
 import { useUploadCache } from './useUploadCache';
@@ -58,6 +58,11 @@ export default function TicketDetail({ ticketId, cardClass, isLight, onBack, onC
   const [changingStatus, setChangingStatus] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
 
+  const [assignees, setAssignees] = useState<TicketAssignee[]>([]);
+  const [assigneesLoading, setAssigneesLoading] = useState(true);
+  const [changingAssignee, setChangingAssignee] = useState(false);
+  const [assigneeError, setAssigneeError] = useState<string | null>(null);
+
   const [comment, setComment] = useState('');
   const [isInternal, setIsInternal] = useState(false);
   const [commentFiles, setCommentFiles] = useState<File[]>([]);
@@ -91,6 +96,23 @@ export default function TicketDetail({ ticketId, cardClass, isLight, onBack, onC
     };
   }, [load]);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    prodevService.getTicketAssignees()
+      .then((res) => {
+        if (!cancelled) setAssignees(res.data ?? []);
+      })
+      .catch((e) => {
+        if (!cancelled) setAssigneeError(errMsg(e, 'No se pudo cargar la lista de responsables.'));
+      })
+      .finally(() => {
+        if (!cancelled) setAssigneesLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, []);
+
   const handleImgError = useCallback(() => {
     if (Date.now() - lastImgReload.current > 30_000) {
       lastImgReload.current = Date.now();
@@ -113,6 +135,38 @@ export default function TicketDetail({ ticketId, cardClass, isLight, onBack, onC
       setStatusError(errMsg(e, 'No se pudo cambiar el estado.'));
     } finally {
       setChangingStatus(false);
+    }
+  };
+
+  const changeAssignee = async (assigneeId: string) => {
+    if (!ticket || changingAssignee || assigneeId === (ticket.assignee?.id ?? '')) return;
+
+    setChangingAssignee(true);
+    setAssigneeError(null);
+
+    try {
+      const res = await prodevService.updateTicketAssignee(ticket.id, assigneeId || null);
+      setTicket((t) => t ? {
+        ...t,
+        assignee: res.assignee,
+        updatedAt: res.updatedAt,
+      } : t);
+      onChanged();
+    } catch (e) {
+      const errorCode = (e as { code?: string } | null)?.code;
+
+      if (errorCode === 'INVALID_ASSIGNEE') {
+        try {
+          const refreshed = await prodevService.getTicketAssignees();
+          setAssignees(refreshed.data ?? []);
+        } catch {
+          // Conservamos el error original de la asignación.
+        }
+      }
+
+      setAssigneeError(errMsg(e, 'No se pudo cambiar el responsable.'));
+    } finally {
+      setChangingAssignee(false);
     }
   };
 
@@ -173,7 +227,6 @@ export default function TicketDetail({ ticketId, cardClass, isLight, onBack, onC
 
   const info: [string, string][] = [
     ['Solicitante', ticket.reporter?.name ?? '—'],
-    ['Asignado a', ticket.assignee?.name ?? 'Sin asignar'],
     ['Categoría', ticket.category?.name ?? '—'],
     ['Proyecto', ticket.project?.name ?? '—'],
     ['Origen', ticket.source ?? '—'],
@@ -246,6 +299,29 @@ export default function TicketDetail({ ticketId, cardClass, isLight, onBack, onC
             </div>
           ))}
         </dl>
+
+        <div className="pt-2 border-t border-gray-500/20 space-y-1.5">
+          <label htmlFor="ticket-assignee" className="text-[10px] opacity-60">Asignado a</label>
+          <select
+            id="ticket-assignee"
+            value={ticket.assignee?.id ?? ''}
+            onChange={(e) => changeAssignee(e.target.value)}
+            disabled={assigneesLoading || changingAssignee}
+            className={inputClass(isLight)}
+          >
+            <option value="">
+              {assigneesLoading ? 'Cargando responsables…' : 'Sin asignar'}
+            </option>
+            {ticket.assignee && !assignees.some((person) => person.id === ticket.assignee?.id) && (
+              <option value={ticket.assignee.id}>{ticket.assignee.name}</option>
+            )}
+            {assignees.map((person) => (
+              <option key={person.id} value={person.id}>{person.name}</option>
+            ))}
+          </select>
+          {changingAssignee && <p className="text-[10px] opacity-50">Guardando responsable…</p>}
+          {assigneeError && <p className="text-[11px] text-red-400">{assigneeError}</p>}
+        </div>
       </div>
 
       {sla && (sla.responseDue || sla.resolutionDue) && (
