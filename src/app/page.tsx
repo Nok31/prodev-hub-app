@@ -1,8 +1,12 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
-import { loginApi, getMeApi, refreshSessionApi, logoutApi, setAccessToken, apiFetch } from '@/services/auth';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { loginApi, getMeApi, refreshSessionApi, logoutApi, setAccessToken, apiFetch, setSessionExpiredHandler } from '@/services/auth';
 import { LayoutDashboard, Ticket, Kanban, Bot, BarChart3 } from 'lucide-react';
+import TicketsModule from '@/components/tickets/TicketsModule';
+import KanbanModule from '@/components/kanban/KanbanModule';
+import AssistantModule from '@/components/ai/AssistantModule';
+import ReportsModule from '@/components/reports/ReportsModule';
 
 export default function MobileApp() {
   const [email, setEmail] = useState('');
@@ -12,6 +16,18 @@ export default function MobileApp() {
   const [userSession, setUserSession] = useState<any>(null);
   const [checkingSession, setCheckingSession] = useState(true);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'tickets' | 'tableros' | 'asistente' | 'reportes' | 'perfil'>('dashboard');
+  const [canUseAi, setCanUseAi] = useState(true);
+  const [canUseReports, setCanUseReports] = useState(true);
+
+  const handleAiForbidden = useCallback(() => {
+    setCanUseAi(false);
+    setActiveTab('dashboard');
+  }, []);
+
+  const handleReportsForbidden = useCallback(() => {
+    setCanUseReports(false);
+    setActiveTab('dashboard');
+  }, []);
 
   const [metrics, setMetrics] = useState({ open: 0, inProgress: 0, waiting: 0, resolvedToday: 0, total: 0 });
   const [activity, setActivity] = useState<any[]>([]);
@@ -39,6 +55,15 @@ export default function MobileApp() {
   const infoRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    setSessionExpiredHandler(() => {
+      setUserSession(null);
+      setNotifications([]);
+      setUnreadCount(0);
+      setActiveTab('dashboard');
+      setUserMenuOpen(false);
+      setError('Tu sesión expiró. Inicia sesión nuevamente.');
+    });
+
     async function checkInitialSession() {
       try {
         const refreshData = await refreshSessionApi();
@@ -75,7 +100,10 @@ export default function MobileApp() {
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      setSessionExpiredHandler(null);
+    };
   }, []);
 
   const registerServiceWorker = async () => {
@@ -658,60 +686,29 @@ export default function MobileApp() {
           )}
 
           {activeTab === 'tickets' && (
-            <div className="space-y-4">
-              <h2 className="text-lg font-extrabold tracking-tight">Tickets</h2>
-              <div className={`${cardClass} p-4 rounded-2xl space-y-2`}>
-                <p className="text-xs opacity-80">Módulo de tickets sincronizado con la API.</p>
-              </div>
-            </div>
+            <TicketsModule cardClass={cardClass} isLight={isLight} />
           )}
 
 {activeTab === 'tableros' && (
-  <div className="p-4 text-slate-100 pb-24">
-    <div className="flex items-center justify-between mb-4">
-      <div>
-        <h1 className="text-xl font-bold tracking-tight">Tableros</h1>
-        <p className="text-xs text-slate-400">1 tablero(s)</p>
-      </div>
-    </div>
-    <div onClick={() => alert("Tablero Hub seleccionado")}
-         className="bg-[#1e293b]/90 border border-slate-800 rounded-2xl overflow-hidden shadow-xl cursor-pointer hover:border-indigo-500/50 transition">
-      <div className="h-28 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 relative">
-        <div className="absolute top-3 right-3 bg-black/40 px-2.5 py-1 rounded-full text-[10px] text-slate-200">Activo</div>
-      </div>
-      <div className="p-4 space-y-3">
-        <div className="text-base font-bold text-white">Hub 🔒</div>
-        <div className="flex items-center justify-between pt-1 border-t border-slate-800 text-xs text-slate-400">
-          <span>👥 BQ · FF · AP</span>
-          <span className="text-sky-400 font-medium">📋 4 listas</span>
-        </div>
-      </div>
-    </div>
-  </div>
-)}
+            <KanbanModule cardClass={cardClass} isLight={isLight} />
+          )}
 
           {/* Módulo Asistente IA */}
-          {activeTab === 'asistente' && (
-            <div className="space-y-4">
-              <h2 className="text-lg font-extrabold tracking-tight">Asistente IA</h2>
-              <div className={`${cardClass} p-4 rounded-2xl`}>
-                <p className="text-xs opacity-80">
-                  Asistente conectado correctamente.
-                </p>
-              </div>
-            </div>
+          {activeTab === 'asistente' && canUseAi && (
+            <AssistantModule
+              cardClass={cardClass}
+              isLight={isLight}
+              onForbidden={handleAiForbidden}
+            />
           )}
 
           {/* Módulo Reportes */}
-          {activeTab === 'reportes' && (
-            <div className="space-y-4">
-              <h2 className="text-lg font-extrabold tracking-tight">Reportes</h2>
-              <div className={`${cardClass} p-4 rounded-2xl`}>
-                <p className="text-xs opacity-80">
-                  Métricas y reportes del tenant.
-                </p>
-              </div>
-            </div>
+          {activeTab === 'reportes' && canUseReports && (
+            <ReportsModule
+              cardClass={cardClass}
+              isLight={isLight}
+              onForbidden={handleReportsForbidden}
+            />
           )}
 
           {/* Navegación Inferior */}
@@ -740,21 +737,25 @@ export default function MobileApp() {
               <span>Tableros</span>
             </button>
 
-            <button
-              onClick={() => setActiveTab('asistente')}
-              className={`flex flex-col items-center space-y-0.5 text-[10px] font-medium transition-colors ${activeTab === 'asistente' ? 'text-blue-500' : 'text-slate-400 hover:text-slate-200'}`}
-            >
-              <Bot className="w-4 h-4" />
-              <span>Asistente IA</span>
-            </button>
+            {canUseAi && (
+              <button
+                onClick={() => setActiveTab('asistente')}
+                className={`flex flex-col items-center space-y-0.5 text-[10px] font-medium transition-colors ${activeTab === 'asistente' ? 'text-blue-500' : 'text-slate-400 hover:text-slate-200'}`}
+              >
+                <Bot className="w-4 h-4" />
+                <span>Asistente IA</span>
+              </button>
+            )}
 
-            <button
-              onClick={() => setActiveTab('reportes')}
-              className={`flex flex-col items-center space-y-0.5 text-[10px] font-medium transition-colors ${activeTab === 'reportes' ? 'text-blue-500' : 'text-slate-400 hover:text-slate-200'}`}
-            >
-              <BarChart3 className="w-4 h-4" />
-              <span>Reportes</span>
-            </button>
+            {canUseReports && (
+              <button
+                onClick={() => setActiveTab('reportes')}
+                className={`flex flex-col items-center space-y-0.5 text-[10px] font-medium transition-colors ${activeTab === 'reportes' ? 'text-blue-500' : 'text-slate-400 hover:text-slate-200'}`}
+              >
+                <BarChart3 className="w-4 h-4" />
+                <span>Reportes</span>
+              </button>
+            )}
           </nav>
 
           </main>
